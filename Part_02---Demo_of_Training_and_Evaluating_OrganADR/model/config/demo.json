@@ -1,0 +1,21 @@
+{
+    "args": {
+      "dataset_dir": "../datasets/",
+      "gpu": 0,
+      "n_epoch": 25,
+      "n_batch": 32,
+      "epoch_per_test": 1,
+      "test_batch_size": 32,
+      "length": 3
+    },
+    "list_of_dataset": ["dataset3"],
+    "list_of_datasource": ["D", "R"],
+    "list_of_dataseed": [15],
+    "list_of_kg": ["H"],
+    "list_of_trainseed": [10],
+    "list_of_trainmethod": ["A"],
+    "list_of_feature": ["F"],
+    "list_of_loss": ["loss2"],
+    "list_of_evaltype": ["eval2"],
+    "list_of_prior_knowledge": ["O"]
+  }
