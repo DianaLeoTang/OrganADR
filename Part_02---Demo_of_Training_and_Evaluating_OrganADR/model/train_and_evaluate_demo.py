@@ -16,6 +16,30 @@ import torch.nn.functional as F
 import itertools
 from sklearn.metrics import accuracy_score, precision_score, recall_score, hamming_loss, roc_auc_score, average_precision_score
 
+# 设备检测函数 - 支持Mac M芯片(MPS)、CUDA和CPU
+def get_device(gpu_id=0):
+    """
+    自动检测并返回最佳可用设备
+    优先级: CUDA > CPU (在Mac上)
+    
+    注意: 由于本项目使用了大量稀疏张量操作，而MPS暂不完全支持稀疏张量，
+    因此在Mac M芯片上目前使用CPU模式以确保稳定性。
+    未来PyTorch完善MPS稀疏张量支持后可以启用MPS加速。
+    """
+    if torch.cuda.is_available():
+        device = torch.device(f'cuda:{gpu_id}')
+        print(f"使用设备: CUDA GPU {gpu_id}")
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        # MPS可用，但由于稀疏张量限制，使用CPU
+        device = torch.device('cpu')
+        print(f"检测到: Apple Silicon MPS")
+        print(f"使用设备: CPU (由于MPS暂不支持稀疏张量操作)")
+        print(f"提示: 这是正常的，CPU模式在Mac M芯片上性能仍然不错")
+    else:
+        device = torch.device('cpu')
+        print(f"使用设备: CPU")
+    return device
+
 def batch_by_size(batch_size, *lists, n_sample=None):
     if n_sample is None:
         n_sample = len(lists[0])
@@ -31,12 +55,13 @@ def batch_by_size(batch_size, *lists, n_sample=None):
             yield ret[0]
 
 class DataLoader:
-    def __init__(self, args):
+    def __init__(self, args, device):
 
         # set paramaters
         self.dataset_dir = args.dataset_dir
         self.dataset = args.dataset
         self.args = args
+        self.target_device = device
         ddi_paths = {
                 'train': os.path.join(self.dataset_dir, '{}/{}/{}/{}.txt'.format(args.dataset, args.datasource, args.dataseed, 'train')),
                 'valid': os.path.join(self.dataset_dir, '{}/{}/{}/{}.txt'.format(args.dataset, args.datasource, args.dataseed, 'valid')),
@@ -136,9 +161,12 @@ class DataLoader:
         idd = np.concatenate([np.expand_dims(np.arange(self.all_ent),1), np.expand_dims(np.arange(self.all_ent),1), all_rel*np.ones((self.all_ent, 1))],1)
         edges = np.concatenate([edges, idd], axis=0)
         values = np.ones(edges.shape[0])
+        
+        # MPS不支持稀疏张量，稀疏张量始终在CPU上创建
+        # 在需要使用时会自动处理设备转换
         adjs = torch.sparse_coo_tensor(indices=torch.LongTensor(edges).t(), 
                                        values=torch.FloatTensor(values), 
-                                       size=torch.Size([self.all_ent, self.all_ent, all_rel+1]), requires_grad=False).cuda()
+                                       size=torch.Size([self.all_ent, self.all_ent, all_rel+1]), requires_grad=False)
         return adjs
 
     def shuffle_train(self, ratio=0.8):
@@ -200,7 +228,7 @@ class GCNLayer(nn.Module):
         return F.relu(output)
 
 class OrganADR(nn.Module):
-    def __init__(self, eval_rel, args):
+    def __init__(self, eval_rel, args, device):
         super(OrganADR, self).__init__()
         self.eval_rel = eval_rel
         self.all_ent = args.all_ent
@@ -211,6 +239,7 @@ class OrganADR(nn.Module):
         self.args = args
         self.n_dim = args.n_dim
         self.g_dim = args.g_dim
+        self.target_device = device
 
         # GCN Module
         self.embedding_layer_in = nn.Embedding(num_embeddings=15, embedding_dim=self.g_dim)
@@ -265,7 +294,7 @@ class OrganADR(nn.Module):
         self.act = nn.ReLU()
         self.relation_linear = nn.ModuleList([nn.Linear(2*args.n_dim, 5) for i in range(self.L)])
         self.attn_relation = nn.ModuleList([nn.Linear(5, all_rel) for i in range(self.L)])
-        self.adjacency_matrix = torch.from_numpy(np.load(f'../datasets/{args.dataset}/{args.datasource}/{args.dataseed}/train_mat.npy').astype(np.float32)).cuda()
+        self.adjacency_matrix = torch.from_numpy(np.load(f'../datasets/{args.dataset}/{args.datasource}/{args.dataseed}/train_mat.npy').astype(np.float32)).to(self.target_device)
 
         self.transfer_matrix = nn.Linear(16, 64)
 
@@ -282,8 +311,8 @@ class OrganADR(nn.Module):
         
         ht_embed = torch.cat([head_embed, tail_embed], dim=-1)
 
-        hiddens = torch.FloatTensor(np.zeros((n_ent, len(head), self.n_dim))).cuda()
-        hiddens[head, torch.arange(len(head)).cuda()] = head_embed
+        hiddens = torch.FloatTensor(np.zeros((n_ent, len(head), self.n_dim))).to(self.target_device)
+        hiddens[head, torch.arange(len(head)).to(self.target_device)] = head_embed
         for l in range(self.L):
             hiddens = hiddens.view(n_ent, -1)
             relation_weight = self.attn_relation[l](nn.ReLU()(self.relation_linear[l](ht_embed)))
@@ -298,8 +327,8 @@ class OrganADR(nn.Module):
             hiddens = self.act(hiddens)
         tail_hid = hiddens.view(n_ent, len(tail), -1)[tail, torch.arange(len(tail))]
 
-        hiddens = torch.FloatTensor(np.zeros((n_ent, len(head), self.n_dim))).cuda()
-        hiddens[tail, torch.arange(len(tail)).cuda()] = tail_embed
+        hiddens = torch.FloatTensor(np.zeros((n_ent, len(head), self.n_dim))).to(self.target_device)
+        hiddens[tail, torch.arange(len(tail)).to(self.target_device)] = tail_embed
         for l in range(self.L):
             hiddens = hiddens.view(n_ent, -1)
             relation_weight = self.attn_relation[l](nn.ReLU()(self.relation_linear[l](ht_embed)))
@@ -364,9 +393,10 @@ class OrganADR(nn.Module):
         return weighted_H
 
 class BaseModel(object):
-    def __init__(self, eval_rel, args, entity_vocab=None, relation_vocab=None):
-        self.model = OrganADR(eval_rel, args)
-        self.model.cuda()
+    def __init__(self, eval_rel, args, device, entity_vocab=None, relation_vocab=None):
+        self.device = device
+        self.model = OrganADR(eval_rel, args, device)
+        self.model.to(device)
 
         self.eval_rel = eval_rel
         self.all_rel = args.all_rel
@@ -381,8 +411,8 @@ class BaseModel(object):
         self.relation_vocab = relation_vocab
 
     def train(self, train_pos, train_neg, KG):
-        pos_head, pos_tail, pos_label = torch.LongTensor(train_pos[:,0]).cuda(), torch.LongTensor(train_pos[:,1]).cuda(), torch.FloatTensor(train_pos[:,2:]).cuda()
-        neg_head, neg_tail, neg_label = torch.LongTensor(train_neg[:,0]).cuda(), torch.LongTensor(train_neg[:,1]).cuda(), torch.FloatTensor(train_neg[:,2:]).cuda()
+        pos_head, pos_tail, pos_label = torch.LongTensor(train_pos[:,0]).to(self.device), torch.LongTensor(train_pos[:,1]).to(self.device), torch.FloatTensor(train_pos[:,2:]).to(self.device)
+        neg_head, neg_tail, neg_label = torch.LongTensor(train_neg[:,0]).to(self.device), torch.LongTensor(train_neg[:,1]).to(self.device), torch.FloatTensor(train_neg[:,2:]).to(self.device)
         n_train = len(pos_head)
         n_batch = self.args.n_batch
 
@@ -423,13 +453,13 @@ class BaseModel(object):
             p_scores = pscores_f[p_r>=0]
             n_scores = nscores_f[p_r>=0]
             scores = torch.cat([p_scores, n_scores], dim=0)
-            labels = torch.cat([torch.ones(len(p_scores)), torch.zeros(len(n_scores))], dim=0).cuda()
+            labels = torch.cat([torch.ones(len(p_scores)), torch.zeros(len(n_scores))], dim=0).to(self.device)
             loss1 = self.bce_loss(scores, labels)
 
             p_scores = pscores_f[p_r>0]
             n_scores = nscores_f[p_r>0]
             scores = torch.cat([p_scores, n_scores], dim=0)
-            labels = torch.cat([torch.ones(len(p_scores)), torch.zeros(len(n_scores))], dim=0).cuda()
+            labels = torch.cat([torch.ones(len(p_scores)), torch.zeros(len(n_scores))], dim=0).to(self.device)
             loss2 = self.bce_loss(scores, labels)
 
             if self.args.loss == 'loss1':
@@ -601,33 +631,42 @@ if __name__ == '__main__':
         random.seed(args.trainseed)
         np.random.seed(args.trainseed)
         torch.manual_seed(args.trainseed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.enabled = False
-        torch.cuda.manual_seed_all(args.trainseed)
-        os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':16:8'
+        
+        # 检测并设置设备 (支持Mac M芯片、CUDA和CPU)
+        device = get_device(args.gpu)
+        
+        # 只在CUDA环境下设置CUDA相关配置
+        if torch.cuda.is_available():
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.enabled = False
+            torch.cuda.manual_seed_all(args.trainseed)
+            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':16:8'
+        
+        # MPS和CPU环境使用相同的随机种子设置
+        if device.type == 'mps':
+            # MPS特定设置（如有需要）
+            pass
 
         # --------------------
         # torch.use_deterministic_algorithms(True, warn_only=True).
         # RuntimeError: adaptive_max_pool2d_backward_cuda does not have a deterministic implementation.
         # --------------------
 
-        torch.cuda.set_device(args.gpu)
-
-        dataloader = DataLoader(args)
+        dataloader = DataLoader(args, device)
         eval_rel = dataloader.eval_rel
         args.all_ent, args.all_rel, args.eval_rel = dataloader.all_ent, dataloader.all_rel, dataloader.eval_rel
         vtKG = dataloader.vtKG
         pos_triplets, neg_triplets = dataloader.pos_triplets, dataloader.neg_triplets
-        valid_pos, valid_neg = torch.LongTensor(pos_triplets['valid']).cuda(), torch.LongTensor(neg_triplets['valid']).cuda()
-        test_pos,  test_neg  = torch.LongTensor(pos_triplets['test']).cuda(),  torch.LongTensor(neg_triplets['test']).cuda()
+        valid_pos, valid_neg = torch.LongTensor(pos_triplets['valid']).to(device), torch.LongTensor(neg_triplets['valid']).to(device)
+        test_pos,  test_neg  = torch.LongTensor(pos_triplets['test']).to(device),  torch.LongTensor(neg_triplets['test']).to(device)
 
         args.train_ent = list(dataloader.train_ent)
 
         if not os.path.exists('../results/demo'):
             os.makedirs('../results/demo')
 
-        model = BaseModel(eval_rel, args)
+        model = BaseModel(eval_rel, args, device)
 
         now = datetime.now()
         begin_time = now.strftime("%Y_%m_%d_%H_%M_%S")
