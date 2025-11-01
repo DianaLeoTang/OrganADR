@@ -1,6 +1,64 @@
 import os
+import sys
 import json
 import argparse
+
+# ========================================
+# 环境修复：必须在所有导入之前执行
+# ========================================
+
+# 1. 修复DLL加载问题：使用add_dll_directory（Python 3.8+推荐方法）
+torch_lib = r"C:\Users\tangw\.conda\envs\organadr\lib\site-packages\torch\lib"
+if os.path.exists(torch_lib):
+    os.add_dll_directory(torch_lib)  # Python 3.8+ 专门用于DLL加载
+    # 同时添加到PATH的最前面，确保编译和运行时都能找到
+    current_path = os.environ.get("PATH", "")
+    if torch_lib not in current_path:
+        os.environ["PATH"] = torch_lib + os.pathsep + current_path
+        # 强制设置，确保torch.utils.cpp_extension也能找到
+        os.environ["TORCH_LIB_PATH"] = torch_lib
+
+# 2. 修复编译器路径问题：自动查找cl.exe并添加到PATH
+vs_buildtools_base = r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC"
+vs_community_base = r"C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC"
+
+cl_path = None
+for vs_base in [vs_buildtools_base, vs_community_base]:
+    if os.path.exists(vs_base):
+        try:
+            # 查找所有MSVC版本目录
+            msvc_dirs = [d for d in os.listdir(vs_base) if os.path.isdir(os.path.join(vs_base, d))]
+            for msvc_dir in msvc_dirs:
+                potential_path = os.path.join(vs_base, msvc_dir, "bin", "Hostx64", "x64")
+                if os.path.exists(os.path.join(potential_path, "cl.exe")):
+                    cl_path = potential_path
+                    break
+            if cl_path:
+                break
+        except:
+            continue
+
+if cl_path:
+    current_path = os.environ.get("PATH", "")
+    if cl_path not in current_path:
+        os.environ["PATH"] = cl_path + os.pathsep + current_path
+
+# 3. 设置CUDA_HOME（如果需要）
+if "CUDA_HOME" not in os.environ:
+    conda_prefix = os.environ.get("CONDA_PREFIX", "")
+    if conda_prefix:
+        os.environ["CUDA_HOME"] = conda_prefix
+
+# 4. 清理可能损坏的编译缓存（如果DLL加载持续失败，可以取消注释）
+# import shutil
+# cache_dir = os.path.expanduser("~/.cache/torch_extensions")
+# if os.path.exists(cache_dir):
+#     try:
+#         shutil.rmtree(cache_dir)
+#         print(f"已清理编译缓存: {cache_dir}")
+#     except:
+#         pass
+
 import torch
 import random
 from torchdrug.layers import functional
