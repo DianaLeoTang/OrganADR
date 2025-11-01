@@ -1,0 +1,28 @@
+# OrganADR Project Dependencies
+# Python 3.9+ required
+
+# Core Dependencies
+numpy<2.0                    # NumPy 1.x required for rdkit compatibility
+scikit-learn>=1.0.0
+tqdm>=4.60.0
+scipy>=1.9.0
+pandas>=1.3.0
+
+# PyTorch Ecosystem (CUDA 12.1 version, compatible with CUDA 12.8)
+# Note: Install PyTorch separately using the command in install_dependencies.ps1
+# torch==2.4.0+cu121
+# torchvision
+# torchaudio
+
+# PyTorch Geometric Extensions
+# Note: Install these using PyG wheel repository
+# torch-scatter
+# torch-cluster
+
+# Deep Learning Library
+# torchdrug>=0.2.0
+
+# Data Processing
+pickle5  # For older Python versions, standard in Python 3.9+
+rdkit>=2023.0.0  # Required by torchdrug
+
