@@ -1,10 +1,28 @@
 import os
+import io
 import sys
 import json
 import argparse
-os.environ.setdefault("TORCH_EXTENSIONS_DIR", os.path.expandvars(r"%LOCALAPPDATA%\torch_extensions"))
-os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.9")  # 4090 Laptop
 
+# 设置 CUDA 环境变量
+cuda_path = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1"
+os.environ["CUDA_PATH"] = cuda_path
+os.environ["CUDA_HOME"] = cuda_path  # 添加这个
+os.environ["INCLUDE"] = os.path.join(cuda_path, "include") + ";" + os.environ.get("INCLUDE", "")  # 关键！
+os.environ["LIB"] = os.path.join(cuda_path, "lib", "x64") + ";" + os.environ.get("LIB", "")
+
+# 添加这个关键编译标志，包含 intrin.h
+os.environ["CFLAGS"] = "/DWIN32 /D_WINDOWS"
+os.environ["CXXFLAGS"] = "/DWIN32 /D_WINDOWS"
+
+os.environ["USE_NINJA"] = "0" # 禁用 ninja
+os.environ["MAX_JOBS"] = "1"
+os.environ.setdefault("TORCH_EXTENSIONS_DIR", os.path.expandvars(r"%LOCALAPPDATA%\torch_extensions"))
+os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.9")
+
+sys.stdout.reconfigure(line_buffering=True)
+# 强制使用无缓冲输出
+sys.stdout = io.TextIOWrapper(open(sys.stdout.fileno(), 'wb', 0), write_through=True)
 
 from torchdrug.layers.functional import spmm as _spmm
 from torchdrug.layers import functional as tdF
@@ -539,11 +557,11 @@ class BaseModel(object):
                roc_auc, prc_auc, accuracy, precision, recall, hamm_loss, pred_class
 
 if __name__ == '__main__':
-    print(">>> parse config ok:", args_input.config)
+    
     parser = argparse.ArgumentParser(description="Load a configuration file.")
     parser.add_argument('--config', type=str, required=True, help='Path to configuration file')
     args_input = parser.parse_args()
-
+    print(">>> parse config ok:", args_input.config)
     class DotDict:
         def __init__(self, **kwargs):
             for key, value in kwargs.items():
