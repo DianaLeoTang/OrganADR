@@ -5,7 +5,7 @@ import json
 import argparse
 
 # 设置 CUDA 环境变量
-cuda_path = r"/usr/local/cuda-11.7"
+cuda_path = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1"
 os.environ["CUDA_PATH"] = cuda_path
 os.environ["CUDA_HOME"] = cuda_path  # 添加这个
 os.environ["INCLUDE"] = os.path.join(cuda_path, "include") + ";" + os.environ.get("INCLUDE", "")  # 关键！
@@ -18,7 +18,7 @@ os.environ["CXXFLAGS"] = "/DWIN32 /D_WINDOWS"
 os.environ["USE_NINJA"] = "0" # 禁用 ninja
 os.environ["MAX_JOBS"] = "1"
 os.environ.setdefault("TORCH_EXTENSIONS_DIR", os.path.expandvars(r"%LOCALAPPDATA%\torch_extensions"))
-os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.6")
+os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.9")
 
 sys.stdout.reconfigure(line_buffering=True)
 # 强制使用无缓冲输出
@@ -44,6 +44,9 @@ from datetime import datetime
 import torch.nn.functional as F
 import itertools
 from sklearn.metrics import accuracy_score, precision_score, recall_score, hamming_loss, roc_auc_score, average_precision_score
+
+os.add_dll_directory(r"C:\Users\tangw\.conda\envs\organadr\Lib\site-packages\torch\lib")
+os.add_dll_directory(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin")
 
 def batch_by_size(batch_size, *lists, n_sample=None):
     if n_sample is None:
