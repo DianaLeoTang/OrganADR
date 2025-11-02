@@ -1,1 +1,9 @@
 .DS_Store
+
+# 训练结果文件
+Part_02---Demo_of_Training_and_Evaluating_OrganADR/results/demo/
+*.pth
+*.pkl
+
+# 但保留参考结果目录
+!Part_02---Demo_of_Training_and_Evaluating_OrganADR/results/demo_for_reference/
